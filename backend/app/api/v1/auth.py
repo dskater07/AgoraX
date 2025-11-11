@@ -1,24 +1,21 @@
-from fastapi import APIRouter, HTTPException, Depends, status, Header
+from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
-from datetime import datetime, timedelta, timezone
-from jose import jwt, JWTError
-from passlib.context import CryptContext
+from datetime import datetime
 from typing import Optional
-import os
+from jose import JWTError
+
+from app.core.security import (
+    verify_password,
+    get_password_hash,
+    create_access_token,
+    decode_token,
+)
+from app.core.config import get_settings
 
 router = APIRouter()
-
-# ================================
-# Configuración JWT
-# ================================
-JWT_SECRET: str = os.getenv("JWT_SECRET", "secret123")
-JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
-JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
-
-# Seguridad de contraseñas
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-bearer_scheme = HTTPBearer(auto_error=False)
+settings = get_settings()
+security = HTTPBearer(auto_error=False)
 
 # ================================
 # Modelos Pydantic
@@ -39,56 +36,45 @@ class PublicUser(BaseModel):
 
 # ================================
 # Simulación mínima de usuarios
-# Reemplaza esto por consulta a BD.
+# (para cuando no hay BD conectada)
 # ================================
 _DEMO_USER_DB = {
-    # password plano: "admin"
     "admin@agorax.com": {
         "email": "admin@agorax.com",
         "full_name": "Administrador AgoraX",
         "role": "admin",
-        "password_hash": pwd_context.hash("admin"),
+        "password_hash": get_password_hash("admin"),  # 🔒 se genera con bcrypt
         "is_active": True,
     }
 }
 
 def get_user_by_email(email: str) -> Optional[dict]:
     """
-    Sustituir por SELECT a PostgreSQL.
+    Sustituir por SELECT real en PostgreSQL.
     """
     return _DEMO_USER_DB.get(email)
 
-def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
-
-def get_password_hash(plain: str) -> str:
-    return pwd_context.hash(plain)
-
-def create_access_token(sub: str, expires_minutes: int = JWT_EXPIRE_MINUTES) -> dict:
-    now = datetime.now(timezone.utc)
-    exp = now + timedelta(minutes=expires_minutes)
-    payload = {"sub": sub, "iat": int(now.timestamp()), "exp": int(exp.timestamp())}
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-    return {"token": token, "expires_at": exp}
-
 # ================================
-# Dependencia: usuario actual
+# Dependencia de usuario actual
 # ================================
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)) -> PublicUser:
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales no provistas")
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> PublicUser:
+    """
+    Decodifica el JWT y devuelve el usuario autenticado.
+    """
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token no proporcionado")
 
     token = credentials.credentials
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        email: str = payload.get("sub")
+        payload = decode_token(token)
+        email = payload.get("sub")
         if not email:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido o expirado")
 
     user = get_user_by_email(email)
-    if not user or not user.get("is_active", False):
+    if not user or not user.get("is_active"):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario no autorizado")
 
     return PublicUser(email=user["email"], full_name=user.get("full_name"), role=user.get("role", "propietario"))
@@ -98,6 +84,9 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer_
 # ================================
 @router.post("/login", response_model=TokenResponse, summary="Autenticación y emisión de JWT")
 def login(request: LoginRequest):
+    """
+    Autentica un usuario (demo) y genera un JWT firmado.
+    """
     user = get_user_by_email(request.email)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas")
@@ -105,13 +94,14 @@ def login(request: LoginRequest):
     if not verify_password(request.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas")
 
-    token_data = create_access_token(sub=user["email"])
+    token, exp = create_access_token(user["email"])
     return {
-        "access_token": token_data["token"],
+        "access_token": token,
         "token_type": "bearer",
-        "expires_at": token_data["expires_at"],
+        "expires_at": exp,
     }
 
 @router.get("/me", response_model=PublicUser, summary="Información del usuario autenticado")
 def me(current: PublicUser = Depends(get_current_user)):
+    """Devuelve los datos del usuario autenticado."""
     return current
