@@ -3,7 +3,7 @@
 
 ---
 
-## 🔐 Tecnologías Principales
+## Tecnologías Principales
 
 | Componente | Tecnología | Descripción |
 |-------------|-------------|-------------|
@@ -19,7 +19,7 @@
 
 ## ⚖️ Reglas de Negocio (BABOK v3 – Cap. 10.9)
 
-### 🔷 Reglas Definicionales (RD)
+### Reglas Definicionales (RD)
 | ID | Descripción | Propósito |
 |----|--------------|------------|
 | **RD-01** | Un propietario solo puede votar una vez por cada punto. | Evitar duplicidad y asegurar integridad. |
@@ -35,7 +35,7 @@
 
 ---
 
-### 🔶 Reglas de Comportamiento (RB)
+### Reglas de Comportamiento (RB)
 | ID | Descripción | Propósito |
 |----|--------------|------------|
 | **RB-01** | Solo el administrador puede abrir o cerrar votaciones. | Control jerárquico del proceso. |
@@ -51,7 +51,7 @@
 
 ---
 
-### 🧠 Reglas Implícitas (RI)
+### Reglas Implícitas (RI)
 | ID | Descripción | Tipo |
 |----|--------------|------|
 | **RI-01** | Todas las reglas deben almacenarse en un repositorio central versionado. | Definicional |
@@ -60,7 +60,7 @@
 
 ---
 
-## 🧩 Cumplimiento de Calidad (ISO/IEC 25010)
+## Cumplimiento de Calidad (ISO/IEC 25010)
 
 | Característica | Descripción |
 |----------------|-------------|
@@ -75,7 +75,7 @@
 
 ---
 
-## 🧠 Metodología
+## Metodología
 El proyecto sigue los lineamientos del **BABOK v3**:
 - *Manage Stakeholder Collaboration* (4.5)
 - *Requirements Life Cycle Management* (5.x)
@@ -98,7 +98,7 @@ Y aplica control de calidad en:
 > Asignatura: *Calidad del Software (2025-2)*  
 
 **Director académico:**  
-> [Nombre del docente a cargo]  
+> ALEX MAURICIO PEREZ
 > ITM – Facultad de Ingenierías  
 
 ---
