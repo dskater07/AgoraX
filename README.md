@@ -89,7 +89,7 @@ Y aplica control de calidad en:
 
 ---
 
-## 👥 Autores
+##  Autores
 **Proyecto académico desarrollado por:**  
 - GAVIRIA OCAMPO JOHAN ESTEBAN
 - PATIÑO MONTOYA DAMIAN
@@ -102,8 +102,4 @@ Y aplica control de calidad en:
 > ITM – Facultad de Ingenierías  
 
 ---
-
-## 🪪 Licencia
-Proyecto distribuido bajo licencia **MIT**, de uso académico y educativo.  
-Se permite su reutilización y adaptación citando la fuente original.
 
