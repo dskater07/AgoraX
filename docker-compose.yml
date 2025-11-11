@@ -1,0 +1,112 @@
+
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    container_name: agorax-backend
+    restart: always
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - cache
+    volumes:
+      - ./backend/app:/app
+    networks:
+      - agorax-net
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  gateway:
+    build: ./gateway
+    container_name: agorax-gateway
+    restart: always
+    ports:
+      - "7000:7000"
+    volumes:
+      - ./gateway:/usr/src/app
+    depends_on:
+      - backend
+    networks:
+      - agorax-net
+    command: node server.js
+
+  frontend:
+    build: ./frontend
+    container_name: agorax-frontend
+    restart: always
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - backend
+    networks:
+      - agorax-net
+    command: npm run dev
+
+  db:
+    image: postgres:17
+    container_name: agorax-db
+    restart: always
+    environment:
+      POSTGRES_USER: agx_user
+      POSTGRES_PASSWORD: agx_pass
+      POSTGRES_DB: agorax_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - agorax-net
+
+  cache:
+    image: redis:alpine
+    container_name: agorax-cache
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - agorax-net
+
+  prometheus:
+    image: prom/prometheus
+    container_name: agorax-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitor/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - agorax-net
+
+  grafana:
+    image: grafana/grafana
+    container_name: agorax-grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - agorax-net
+
+  proxy:
+    image: nginx:latest
+    container_name: agorax-proxy
+    ports:
+      - "80:80"
+    depends_on:
+      - frontend
+      - backend
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/nginx.conf
+    networks:
+      - agorax-net
+
+volumes:
+  postgres_data:
+
+networks:
+  agorax-net:
+    driver: bridge
