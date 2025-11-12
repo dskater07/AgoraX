@@ -1,5 +1,5 @@
 # ============================================================
-# 🐍 Backend AgoraX - FastAPI + Poetry
+# Backend AgoraX - FastAPI + Poetry
 # ============================================================
 
 FROM python:3.11-slim
