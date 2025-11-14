@@ -1,0 +1,8 @@
+"""
+Paquete principal de la aplicación AgoraX.
+
+Contiene el código fuente del backend (API, core, modelos, esquemas y servicios).
+Este paquete se expone a Uvicorn como `app.main:app`.
+"""
+
+__all__ = ["api", "core"]

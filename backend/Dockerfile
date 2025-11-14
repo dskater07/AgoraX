@@ -1,39 +1,65 @@
 # ============================================================
-# Backend AgoraX - FastAPI + Poetry
+# Backend AgoraX - FastAPI + Poetry (Optimizado)
 # ============================================================
 
 FROM python:3.11-slim
 
-# Configuración del entorno
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# ------------------------------
+# Configuración básica del entorno
+# ------------------------------
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    # Config global de Poetry
+    POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_NO_INTERACTION=1
 
-# Crear directorio de trabajo
+# Directorio de trabajo dentro del contenedor
 WORKDIR /app
 
-# Instalar dependencias del sistema necesarias
+# ------------------------------
+# Dependencias del sistema
+# ------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libpq-dev curl && \
-    rm -rf /var/lib/apt/lists/*
+    build-essential \
+    libpq-dev \
+    curl \
+  && rm -rf /var/lib/apt/lists/*
 
-# ------------------------------------------------------------
-# Instalar Poetry (gestor de dependencias)
-# ------------------------------------------------------------
-RUN curl -sSL https://install.python-poetry.org | python3 -
-ENV PATH="/root/.local/bin:$PATH"
+# ------------------------------
+# Instalación de Poetry
+# ------------------------------
+RUN curl -sSL https://install.python-poetry.org | python3 - \
+  && ln -s /root/.local/bin/poetry /usr/local/bin/poetry
 
-# Copiar solo archivos de dependencias para aprovechar cache
+# ------------------------------
+# Copiar solo archivos de dependencias para usar caché
+# ------------------------------
 COPY pyproject.toml ./
+# Si en el futuro tienes poetry.lock, descomenta esto:
+# COPY poetry.lock ./
 
-# Instalar dependencias del proyecto SIN crear venv local
-RUN poetry config virtualenvs.create false \
- && poetry install --no-root --no-interaction --no-ansi
+# ------------------------------
+# Instalación de dependencias (incluye grupo docs si lo defines)
+# ------------------------------
+RUN poetry install --no-root --no-ansi
 
-# Copiar el código fuente
+# ------------------------------
+# Copiar el código fuente de la app
+# ------------------------------
 COPY ./app /app/app
 
-# Exponer puerto
+# ------------------------------
+# Crear usuario no root para ejecutar la app
+# ------------------------------
+RUN useradd -m agorax
+USER agorax
+
+# ------------------------------
+# Exponer puerto de FastAPI
+# ------------------------------
 EXPOSE 8000
 
+# ------------------------------
 # Comando por defecto
+# ------------------------------
 CMD ["poetry", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
