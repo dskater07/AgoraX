@@ -37,8 +37,8 @@ services:
     container_name: agorax-frontend
     restart: unless-stopped
     working_dir: /app
-    volumes:
-      - ./frontend:/app
+    # volumes:
+    #   - ./frontend:/app
     ports:
       - "5173:5173"
     depends_on:

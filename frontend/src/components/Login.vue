@@ -1,113 +1,86 @@
 <template>
-  <section class="card">
-    <h2>Ingreso a AgoraX</h2>
-    <form @submit.prevent="login">
-      <label>
-        Correo electrónico
-        <input v-model="email" type="email" required />
-      </label>
+  <div class="card" style="width: min(420px, 92vw);">
+    <div style="text-align: center; margin-bottom: 18px;">
+      <strong style="font-size: 24px; letter-spacing: 0.6px;">Iniciar sesión</strong>
+      <div style="color: var(--muted); margin-top: 4px;">
+        Accede a la asamblea electrónica
+      </div>
+    </div>
 
-      <label>
-        Contraseña
-        <input v-model="password" type="password" required />
-      </label>
+    <div style="margin-bottom: 10px;">
+      <label class="label">Correo</label>
+      <input
+        class="input"
+        v-model="email"
+        type="email"
+        placeholder="tu@correo.com"
+      />
+    </div>
 
-      <button type="submit" :disabled="loading">
-        {{ loading ? "Ingresando..." : "Ingresar" }}
+    <div style="margin-bottom: 10px;">
+      <label class="label">Contraseña</label>
+      <input
+        class="input"
+        v-model="password"
+        type="password"
+        placeholder="********"
+        @keyup.enter="submit"
+      />
+    </div>
+
+    <div class="row" style="justify-content: space-between; margin-bottom: 12px;">
+      <label style="color: var(--muted); font-size: 13px;">
+        <input type="checkbox" v-model="remember" />
+        Recordarme
+      </label>
+      <button class="link" type="button" @click="$emit('go-register')">
+        Crear cuenta
       </button>
+    </div>
 
-      <p v-if="error" class="error">{{ error }}</p>
-    </form>
-  </section>
+    <button class="btn" style="width: 100%;" :disabled="loading" @click="submit">
+      {{ loading ? "Ingresando..." : "Iniciar sesión" }}
+    </button>
+
+    <p v-if="error" style="color: var(--danger); margin-top: 8px;">
+      {{ error }}
+    </p>
+  </div>
 </template>
 
 <script setup>
 import { ref } from "vue";
 
-const emit = defineEmits(["login-success"]);
+const emit = defineEmits(["login-success", "go-register"]);
 
-const email = ref("admin@agorax.com");
-const password = ref("admin");
+const email = ref("");
+const password = ref("");
+const remember = ref(true);
 const loading = ref(false);
 const error = ref("");
 
-const login = async () => {
-  loading.value = true;
+async function submit() {
   error.value = "";
-
+  if (!email.value || !password.value) {
+    error.value = "Completa correo y contraseña.";
+    return;
+  }
+  loading.value = true;
   try {
-    const resp = await fetch("http://localhost:8000/api/v1/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: email.value,
-        password: password.value
-      })
-    });
-
-    if (!resp.ok) {
-      throw new Error("Credenciales inválidas");
+    // aquí conectarías con FastAPI /auth/login
+    const mockUser = {
+      name: "Propietario 101",
+      role: "propietario",
+      email: email.value
+    };
+    if (remember.value) {
+      localStorage.setItem("agx_user", JSON.stringify(mockUser));
     }
-
-    const data = await resp.json();
-    if (!data.access_token) {
-      throw new Error("Respuesta inválida del servidor");
-    }
-
-    emit("login-success", data.access_token);
-  } catch (err) {
-    error.value = err.message || "Error de autenticación";
+    emit("login-success", mockUser);
+  } catch (e) {
+    error.value = "No se pudo iniciar sesión.";
   } finally {
     loading.value = false;
   }
-};
+}
 </script>
-
-<style scoped>
-.card {
-  max-width: 360px;
-  margin: 2rem auto;
-  padding: 1.5rem;
-  background: #020617;
-  border-radius: 0.75rem;
-  border: 1px solid #1e293b;
-}
-
-label {
-  display: block;
-  margin-bottom: 1rem;
-  font-size: 0.9rem;
-}
-
-input {
-  width: 100%;
-  padding: 0.4rem 0.5rem;
-  margin-top: 0.25rem;
-  border-radius: 0.4rem;
-  border: 1px solid #334155;
-  background: #020617;
-  color: #e5e7eb;
-}
-
-button {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
-  border: none;
-  background: #22c55e;
-  color: #020617;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.7;
-  cursor: wait;
-}
-
-.error {
-  margin-top: 0.5rem;
-  color: #f97373;
-  font-size: 0.85rem;
-}
-</style>

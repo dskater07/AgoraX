@@ -1,72 +1,111 @@
 <template>
-  <div>
-    <p v-if="loading">Cargando estado de quórum...</p>
-
-    <div v-else-if="data">
-      <p><strong>Presentes:</strong> {{ data.presentes }} / {{ data.total_propietarios }}</p>
-      <p><strong>Quórum:</strong> {{ data.porcentaje_quorum }} % (mínimo {{ data.umbral_minimo }} %)</p>
-      <p><strong>Estado:</strong> {{ data.estado }}</p>
+  <div class="card" style="width: min(900px, 96vw);">
+    <div class="row" style="justify-content: space-between; margin-bottom: 12px;">
+      <div>
+        <h2 style="margin: 0;">Resultados de la votación</h2>
+        <span class="badge">Asamblea #{{ meetingId }}</span>
+      </div>
+      <button class="btn ghost" @click="$emit('back-dashboard')">
+        Volver al dashboard
+      </button>
     </div>
 
-    <p v-else>No se pudo obtener información de quórum.</p>
+    <div
+      style="
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+        margin-bottom: 16px;
+      "
+    >
+      <div class="kpi">
+        <h3>SÍ</h3>
+        <div class="val">{{ counts.si }}</div>
+      </div>
+      <div class="kpi">
+        <h3>NO</h3>
+        <div class="val">{{ counts.no }}</div>
+      </div>
+      <div class="kpi">
+        <h3>ABST.</h3>
+        <div class="val">{{ counts.abs }}</div>
+      </div>
+    </div>
 
-    <button @click="load" :disabled="loading" class="reload">
-      {{ loading ? "Actualizando..." : "Actualizar" }}
-    </button>
+    <div class="card" style="margin-top: 0; padding: 16px;">
+      <div class="row" style="justify-content: space-between;">
+        <strong>Auditoría (muestra)</strong>
+        <button class="btn" @click="signActa">Firmar electrónicamente</button>
+      </div>
+      <table class="table" style="margin-top: 10px;">
+        <thead>
+          <tr>
+            <th>Usuario</th>
+            <th>Opción</th>
+            <th>IP</th>
+            <th>Fecha/Hora</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(row, idx) in audit" :key="idx">
+            <td>{{ row.user }}</td>
+            <td>{{ row.option }}</td>
+            <td style="color: var(--muted);">{{ row.ip }}</td>
+            <td style="color: var(--muted);">{{ row.timestamp }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from "vue";
+import { ref, onMounted } from "vue";
 
 const props = defineProps({
-  meetingId: {
-    type: Number,
-    required: true
-  },
-  reloadTrigger: {
-    type: Number,
-    required: false,
-    default: 0
-  }
+  meetingId: { type: [String, Number], required: true }
 });
 
-const data = ref(null);
-const loading = ref(false);
+const counts = ref({ si: 230, no: 88, abs: 26 });
+const audit = ref([]);
 
-const load = async () => {
-  loading.value = true;
-  try {
-    const url = `http://localhost:8000/api/v1/quorum?meeting_id=${props.meetingId}`;
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error("Error cargando quórum");
-    data.value = await resp.json();
-  } catch (err) {
-    console.error(err);
-    data.value = null;
-  } finally {
-    loading.value = false;
-  }
-};
+onMounted(() => {
+  audit.value = [
+    {
+      user: "prop_102",
+      option: "SI",
+      ip: "181.55.102.21",
+      timestamp: "2025-11-10 14:22"
+    },
+    {
+      user: "prop_077",
+      option: "NO",
+      ip: "179.23.40.9",
+      timestamp: "2025-11-10 14:23"
+    }
+  ];
+});
 
-onMounted(load);
-
-watch(
-  () => props.reloadTrigger,
-  () => {
-    load();
-  }
-);
+function signActa() {
+  alert("Acta firmada electrónicamente (demo).");
+}
 </script>
 
 <style scoped>
-.reload {
-  margin-top: 1rem;
-  padding: 0.35rem 0.7rem;
-  border-radius: 0.5rem;
-  border: 1px solid #334155;
-  background: #020617;
-  color: #e5e7eb;
-  cursor: pointer;
+.kpi {
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 16px;
+}
+.kpi h3 {
+  margin: 0 0 6px 0;
+  color: var(--muted);
+  font-weight: 600;
+}
+.kpi .val {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
 }
 </style>
