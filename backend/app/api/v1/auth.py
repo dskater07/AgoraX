@@ -1,152 +1,96 @@
 """
-Módulo de Autenticación y Gestión de Sesiones (API v1)
-------------------------------------------------------
+backend/app/api/v1/auth.py
 
-Este módulo maneja el proceso de autenticación del sistema AgoraX,
-incluyendo generación de tokens JWT, validación de identidad y
-obtención de información del usuario autenticado.
+Endpoints de autenticación y gestión básica de usuarios para AgoraX.
 
-Basado en FastAPI, Pydantic y Python-JOSE.
-
-Reglas de negocio aplicadas:
-    - RD-03: Solo usuarios autenticados pueden votar.
-    - RB-01: Solo el administrador puede abrir o cerrar votaciones.
-    - RB-06: Registrar información del acceso para auditoría.
+Incluye:
+- /auth/login: Autenticación con email y contraseña, emisión de JWT.
+- /auth/me: Consulta del usuario actual autenticado.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr
-from datetime import datetime
-from typing import Optional
-from jose import JWTError
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
+from app.core.db import get_db
 from app.core.security import (
     verify_password,
     get_password_hash,
     create_access_token,
-    decode_token,
+    get_current_user,
 )
-from app.core.config import get_settings
+from app.models import User
+from app.schemas.user_schema import UserCreate, UserRead, Token
 
-router = APIRouter()
-settings = get_settings()
-security = HTTPBearer(auto_error=False)
-
-
-class LoginRequest(BaseModel):
-    """Estructura de datos para solicitud de autenticación."""
-    email: EmailStr
-    password: str
+router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
-class TokenResponse(BaseModel):
-    """Respuesta generada tras autenticación exitosa."""
-    access_token: str
-    token_type: str = "bearer"
-    expires_at: datetime
-
-
-class PublicUser(BaseModel):
-    """Representación mínima del usuario autenticado en el sistema."""
-    email: EmailStr
-    full_name: Optional[str] = None
-    role: str = "propietario"
-
-
-# -------------------------------------------------------------------
-# Base de datos temporal para demostración (mock de usuarios)
-# -------------------------------------------------------------------
-_DEMO_USER_DB = {
-    "admin@agorax.com": {
-        "email": "admin@agorax.com",
-        "full_name": "Administrador AgoraX",
-        "role": "admin",
-        "password_hash": get_password_hash("admin"),
-        "is_active": True,
-    }
-}
-
-
-def get_user_by_email(email: str) -> Optional[dict]:
+@router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
     """
-    Recupera un usuario de la base de datos temporal.
+    Registra un nuevo usuario en el sistema.
 
-    Args:
-        email: Dirección de correo del usuario.
+    NOTA ACADÉMICA:
+        - En un entorno productivo, probablemente no se expondría un endpoint
+          de registro general, sino que estaría restringido a administradores.
 
-    Returns:
-        dict | None: Información del usuario o None si no existe.
+    Regla de negocio relacionada:
+        - RD-03: Solo usuarios autenticados pueden votar (este endpoint permite
+          crear dichas identidades).
     """
-    return _DEMO_USER_DB.get(email)
+    existing = db.query(User).filter(User.email == user_in.email).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ya existe un usuario con ese email.",
+        )
+
+    hashed_password = get_password_hash(user_in.password)
+    user = User(
+        email=user_in.email,
+        hashed_password=hashed_password,
+        full_name=user_in.full_name,
+        role=user_in.role,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> PublicUser:
+@router.post("/login", response_model=Token)
+def login(user_in: UserCreate, db: Session = Depends(get_db)):
     """
-    Decodifica el token JWT y retorna los datos del usuario autenticado.
+    Autentica a un usuario existente y devuelve un token JWT.
 
-    Args:
-        credentials: Credenciales HTTP Bearer proporcionadas por el cliente.
+    Implementa:
+        - Verificación de credenciales (email + password).
+        - Generación de token JWT con create_access_token.
 
-    Raises:
-        HTTPException: Si el token no es válido, expiró o el usuario no existe.
-
-    Returns:
-        PublicUser: Modelo con información básica del usuario autenticado.
+    Regla:
+        - RD-03: Solo usuarios autenticados pueden votar (a partir de este token).
     """
-    if not credentials or credentials.scheme.lower() != "bearer":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token no proporcionado")
+    user = db.query(User).filter(User.email == user_in.email).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales inválidas.",
+        )
 
-    token = credentials.credentials
-    try:
-        payload = decode_token(token)
-        email = payload.get("sub")
-        if not email:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
-    except JWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido o expirado")
+    if not verify_password(user_in.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales inválidas.",
+        )
 
-    user = get_user_by_email(email)
-    if not user or not user.get("is_active"):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario no autorizado")
-
-    return PublicUser(email=user["email"], full_name=user.get("full_name"), role=user.get("role", "propietario"))
+    access_token = create_access_token(subject=user.email)
+    return Token(access_token=access_token, token_type="bearer")
 
 
-@router.post("/login", response_model=TokenResponse, summary="Autenticación y emisión de JWT")
-def login(request: LoginRequest):
+@router.get("/me", response_model=UserRead)
+def read_current_user(current_user: User = Depends(get_current_user)):
     """
-    Realiza la autenticación del usuario y emite un token JWT firmado.
+    Devuelve la información del usuario autenticado actual.
 
-    Este endpoint valida las credenciales proporcionadas y, en caso de éxito,
-    devuelve un token que permite realizar operaciones protegidas por seguridad.
-
-    Args:
-        request: Cuerpo de la solicitud con `email` y `password`.
-
-    Raises:
-        HTTPException: Si las credenciales son inválidas.
-
-    Returns:
-        TokenResponse: Token de acceso y metadatos de expiración.
+    Se basa en el token JWT enviado en la cabecera Authorization.
     """
-    user = get_user_by_email(request.email)
-    if not user or not verify_password(request.password, user["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales inválidas")
-
-    token, exp = create_access_token(user["email"])
-    return {"access_token": token, "token_type": "bearer", "expires_at": exp}
-
-
-@router.get("/me", response_model=PublicUser, summary="Información del usuario autenticado")
-def me(current: PublicUser = Depends(get_current_user)):
-    """
-    Devuelve los datos del usuario autenticado actual.
-
-    Args:
-        current: Usuario autenticado obtenido desde el token.
-
-    Returns:
-        PublicUser: Información básica del usuario activo.
-    """
-    return current
+    return current_user

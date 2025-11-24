@@ -1,261 +1,325 @@
 """
-Módulo de Asambleas (API v1)
-----------------------------
+backend/app/api/v1/meetings.py
 
-Gestiona el ciclo de vida de una asamblea: creación, consulta y
-transiciones de estado (pendiente → abierta → cerrada).
+Endpoints para la gestión de:
 
-Reglas de negocio aplicadas:
-    - RD-04: Quorum mínimo de referencia en la entidad.
-    - RD-07: Cada asamblea dispone de un identificador único.
-    - RB-01: Solo el administrador puede abrir/cerrar asambleas.
-    - RB-02: Debe cerrarse una asamblea antes de abrir otra.
+- Asambleas (Meeting)
+- Puntos de agenda (AgendaItem)
+- Presencias (Presence)
+
+Implementa varios aspectos del ciclo de vida de requerimientos y reglas de negocio:
+- Creación de asambleas.
+- Cambio de estado (CREATED / IN_PROGRESS / CLOSED).
+- Definición de agenda.
+- Registro de presencias, base para cálculo de quórum.
 """
 
-from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session, joinedload
 
-from .auth import PublicUser, get_current_user
+from app.core.db import get_db
+from app.core.security import get_current_user
+from app.models import (
+    Meeting,
+    AgendaItem,
+    Presence,
+    Owner,
+    User,
+)
 from app.schemas.meeting_schema import (
     MeetingCreate,
-    MeetingOut,
-    MeetingUpdate,
-    MeetingStatusEnum,
+    MeetingUpdateStatus,
+    MeetingSummary,
+    MeetingDetail,
+    AgendaItemCreate,
+    AgendaItemDetail,
+    PresenceCreate,
+    PresenceSummary,
 )
+from app.services.audit_service import log_action
 
-router = APIRouter()
-
-# -------------------------------------------------------------------
-# Almacenamiento temporal (mock). Reemplazar por persistencia real.
-# -------------------------------------------------------------------
-MEETINGS: list[dict] = []
+router = APIRouter(prefix="/api/v1/meetings", tags=["meetings"])
 
 
-def _get_meeting(meeting_id: int) -> dict | None:
-    """Obtiene una asamblea por ID desde almacenamiento temporal.
+# ================== ASAMBLEAS ==================
 
-    Args:
-        meeting_id: Identificador de la asamblea.
 
-    Returns:
-        dict | None: Asamblea encontrada o None si no existe.
+@router.post("/", response_model=MeetingSummary, status_code=status.HTTP_201_CREATED)
+def create_meeting(
+    meeting_in: MeetingCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
-    for m in MEETINGS:
-        if m["id"] == meeting_id:
-            return m
-    return None
+    Crea una nueva asamblea para un conjunto residencial.
+
+    Regla de negocio relacionada:
+        - RD-07: Cada asamblea debe tener un identificador único.
+    """
+    meeting = Meeting(
+        condominium_id=meeting_in.condominium_id,
+        title=meeting_in.title,
+        total_propietarios=meeting_in.total_propietarios,
+        status="CREATED",
+    )
+    db.add(meeting)
+    db.commit()
+    db.refresh(meeting)
+
+    log_action(
+        db,
+        user_id=current_user.id,
+        action="CREATE_MEETING",
+        entity_type="Meeting",
+        entity_id=meeting.id,
+        description=f"Asamblea creada: {meeting.title}",
+    )
+
+    return meeting
+
+
+@router.get("/", response_model=List[MeetingSummary])
+def list_meetings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Devuelve el listado de asambleas registradas.
+
+    Se utiliza para la vista general de reuniones.
+    """
+    meetings = db.query(Meeting).order_by(Meeting.date.desc()).all()
+    return meetings
+
+
+@router.get("/{meeting_id}", response_model=MeetingDetail)
+def get_meeting_detail(
+    meeting_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Devuelve el detalle de una asamblea específica, incluyendo sus puntos de agenda.
+    """
+    meeting = (
+        db.query(Meeting)
+        .options(joinedload(Meeting.agenda_items))
+        .filter(Meeting.id == meeting_id)
+        .first()
+    )
+
+    if not meeting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Asamblea no encontrada.",
+        )
+
+    return meeting
+
+
+@router.patch("/{meeting_id}/status", response_model=MeetingSummary)
+def update_meeting_status(
+    meeting_id: int,
+    data: MeetingUpdateStatus,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Actualiza el estado de una asamblea.
+
+    Ejemplos:
+        - CREATED → IN_PROGRESS
+        - IN_PROGRESS → CLOSED
+
+    Reglas:
+        - RD-05: Los resultados no se modifican tras el cierre. El cambio a CLOSED
+          debe considerarse definitivo en el flujo de negocio.
+    """
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+
+    if not meeting:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Asamblea no encontrada.",
+        )
+
+    meeting.status = data.status
+    db.add(meeting)
+    db.commit()
+    db.refresh(meeting)
+
+    log_action(
+        db,
+        user_id=current_user.id,
+        action="UPDATE_MEETING_STATUS",
+        entity_type="Meeting",
+        entity_id=meeting.id,
+        description=f"Estado actualizado a {meeting.status}",
+    )
+
+    return meeting
+
+
+# ================== AGENDA ITEMS ==================
 
 
 @router.post(
-    "/",
-    response_model=MeetingOut,
+    "/{meeting_id}/agenda",
+    response_model=AgendaItemDetail,
     status_code=status.HTTP_201_CREATED,
-    summary="Crear nueva asamblea",
 )
-def create_meeting(
-    payload: MeetingCreate,
-    current_user: PublicUser = Depends(get_current_user),
+def add_agenda_item(
+    meeting_id: int,
+    item_in: AgendaItemCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Crea una asamblea en estado **pendiente**.
-
-    Requiere rol **admin** (RB-01). Genera un identificador único (RD-07).
-
-    Args:
-        payload: Datos base (título, hora de inicio, quorum mínimo).
-        current_user: Usuario autenticado.
-
-    Raises:
-        HTTPException: 403 si el usuario no es admin.
-
-    Returns:
-        MeetingOut: Asamblea creada.
     """
-    if current_user.role != "admin":
+    Agrega un nuevo punto de agenda a una asamblea.
+
+    Regla relacionada:
+        - RB-02 se implementa en la lógica de aperturas/cierres de puntos,
+          no en la creación.
+    """
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo el administrador puede crear asambleas.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Asamblea no encontrada.",
         )
 
-    data = payload.model_dump()
-    data.update(
-        {
-            "id": len(MEETINGS) + 1,
-            "status": MeetingStatusEnum.pendiente.value,
-            "created_at": datetime.utcnow(),
-            "opened_at": None,
-            "closed_at": None,
-        }
+    agenda_item = AgendaItem(
+        meeting_id=meeting_id,
+        title=item_in.title,
+        status="PENDING",
     )
-    MEETINGS.append(data)
-    return MeetingOut(**data)
+    db.add(agenda_item)
+    db.commit()
+    db.refresh(agenda_item)
 
+    log_action(
+        db,
+        user_id=current_user.id,
+        action="ADD_AGENDA_ITEM",
+        entity_type="AgendaItem",
+        entity_id=agenda_item.id,
+        description=f"Punto de agenda creado: {agenda_item.title}",
+    )
 
-@router.get("/", response_model=List[MeetingOut], summary="Listar asambleas")
-def list_meetings():
-    """Lista todas las asambleas registradas.
-
-    Raises:
-        HTTPException: 404 si no hay asambleas registradas.
-
-    Returns:
-        list[MeetingOut]: Colección de asambleas.
-    """
-    if not MEETINGS:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="No hay asambleas registradas."
-        )
-    return [MeetingOut(**m) for m in MEETINGS]
+    return agenda_item
 
 
 @router.patch(
-    "/{meeting_id}",
-    response_model=MeetingOut,
-    summary="Actualizar datos de una asamblea",
+    "/{meeting_id}/agenda/{agenda_item_id}/status",
+    response_model=AgendaItemDetail,
 )
-def update_meeting(
+def update_agenda_item_status(
     meeting_id: int,
-    payload: MeetingUpdate,
-    current_user: PublicUser = Depends(get_current_user),
+    agenda_item_id: int,
+    data: MeetingUpdateStatus,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Actualiza metadatos de una asamblea (no cambia aperturas/cierres).
-
-    Requiere rol **admin** (RB-01). Permite modificar título, hora y quorum.
-
-    Args:
-        meeting_id: Identificador de la asamblea.
-        payload: Campos opcionales a actualizar.
-        current_user: Usuario autenticado.
-
-    Raises:
-        HTTPException:
-            403 si no es admin.
-            404 si no existe la asamblea.
-
-    Returns:
-        MeetingOut: Asamblea actualizada.
     """
-    if current_user.role != "admin":
+    Actualiza el estado de un punto de agenda.
+
+    Aquí se materializa parte de RB-02:
+        - Debe cerrarse un punto antes de abrir otro (validación adicional
+          podría implementarse en rule_engine si se requiere).
+    """
+    agenda_item = (
+        db.query(AgendaItem)
+        .filter(
+            AgendaItem.id == agenda_item_id,
+            AgendaItem.meeting_id == meeting_id,
+        )
+        .first()
+    )
+
+    if not agenda_item:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo el administrador puede actualizar asambleas.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Punto de agenda no encontrado.",
         )
 
-    m = _get_meeting(meeting_id)
-    if not m:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Asamblea no encontrada."
-        )
+    agenda_item.status = data.status
+    db.add(agenda_item)
+    db.commit()
+    db.refresh(agenda_item)
 
-    updates = payload.model_dump(exclude_unset=True)
-    # Validación de estado si viene en payload (no cambia aperturas/cierres aquí)
-    if "status" in updates:
-        status_val = (
-            updates["status"].value if hasattr(updates["status"], "value") else updates["status"]
-        )
-        if status_val not in [e.value for e in MeetingStatusEnum]:
-            raise HTTPException(status_code=400, detail="Estado inválido.")
-        m["status"] = status_val
-        updates.pop("status", None)
+    log_action(
+        db,
+        user_id=current_user.id,
+        action="UPDATE_AGENDA_ITEM_STATUS",
+        entity_type="AgendaItem",
+        entity_id=agenda_item.id,
+        description=f"Estado del punto actualizado a {agenda_item.status}",
+    )
 
-    for k, v in updates.items():
-        m[k] = v
-
-    return MeetingOut(**m)
+    return agenda_item
 
 
-@router.post("/open", summary="Abrir asamblea para votación")
-def open_meeting(
-    meeting_id: int = Query(..., description="ID de la asamblea a abrir"),
-    current_user: PublicUser = Depends(get_current_user),
+# ================== PRESENCES ==================
+
+
+@router.post(
+    "/{meeting_id}/presence",
+    response_model=PresenceSummary,
+    status_code=status.HTTP_201_CREATED,
+)
+def register_presence(
+    meeting_id: int,
+    presence_in: PresenceCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Transición **pendiente → abierta**.
-
-    Requiere rol **admin** (RB-01). Valida que **no haya otra asamblea abierta**
-    (RB-02).
-
-    Args:
-        meeting_id: Identificador de la asamblea a abrir.
-        current_user: Usuario autenticado.
-
-    Raises:
-        HTTPException:
-            403 si no es admin.
-            409 si ya existe una asamblea abierta.
-            404 si no existe la asamblea.
-            400 si la asamblea no está en estado pendiente.
-
-    Returns:
-        dict: Mensaje y asamblea resultante.
     """
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo el administrador puede abrir asambleas.",
-        )
+    Registra la presencia de un propietario en una asamblea.
 
-    # RB-02: no permitir dos asambleas abiertas simultáneamente
-    for existing in MEETINGS:
-        if existing["status"] == MeetingStatusEnum.abierta.value:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Ya existe una asamblea abierta.",
-            )
-
-    m = _get_meeting(meeting_id)
-    if not m:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Asamblea no encontrada."
-        )
-    if m["status"] != MeetingStatusEnum.pendiente.value:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="La asamblea no está pendiente."
-        )
-
-    m["status"] = MeetingStatusEnum.abierta.value
-    m["opened_at"] = datetime.utcnow()
-    return {"message": f"Asamblea '{m['title']}' abierta correctamente.", "meeting": MeetingOut(**m)}
-
-
-@router.post("/close", summary="Cerrar asamblea en curso")
-def close_meeting(
-    meeting_id: int = Query(..., description="ID de la asamblea a cerrar"),
-    current_user: PublicUser = Depends(get_current_user),
-):
-    """Transición **abierta → cerrada**.
-
-    Requiere rol **admin** (RB-01).
-
-    Args:
-        meeting_id: Identificador de la asamblea a cerrar.
-        current_user: Usuario autenticado.
-
-    Raises:
-        HTTPException:
-            403 si no es admin.
-            404 si no existe la asamblea.
-            400 si la asamblea no está abierta.
-
-    Returns:
-        dict: Mensaje y asamblea resultante.
+    Reglas relacionadas:
+        - RB-03: El usuario debe confirmar asistencia antes de votar.
+        - RD-04: El coeficiente se usa para el cálculo de quórum.
     """
-    if current_user.role != "admin":
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo el administrador puede cerrar asambleas.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Asamblea no encontrada.",
         )
 
-    m = _get_meeting(meeting_id)
-    if not m:
+    owner = db.query(Owner).filter(Owner.id == presence_in.owner_id).first()
+    if not owner:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Asamblea no encontrada."
-        )
-    if m["status"] != MeetingStatusEnum.abierta.value:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="La asamblea no está abierta."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Propietario no encontrado.",
         )
 
-    m["status"] = MeetingStatusEnum.cerrada.value
-    m["closed_at"] = datetime.utcnow()
-    return {"message": f"Asamblea '{m['title']}' cerrada correctamente.", "meeting": MeetingOut(**m)}
+    presence = Presence(
+        meeting_id=meeting_id,
+        owner_id=presence_in.owner_id,
+        coeficiente=presence_in.coeficiente,
+    )
+    db.add(presence)
+    db.commit()
+    db.refresh(presence)
+
+    log_action(
+        db,
+        user_id=current_user.id,
+        action="REGISTER_PRESENCE",
+        entity_type="Presence",
+        entity_id=presence.id,
+        description=(
+            f"Presencia registrada para owner_id={owner.id}, "
+            f"coeficiente={presence.coeficiente}"
+        ),
+    )
+
+    return PresenceSummary(
+        owner_id=owner.id,
+        owner_name=owner.name,
+        coeficiente=presence.coeficiente,
+        created_at=presence.created_at,
+    )
