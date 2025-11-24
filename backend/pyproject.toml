@@ -1,36 +1,34 @@
 [tool.poetry]
 name = "agorax-backend"
-version = "1.0.0"
-description = "Backend del sistema de votación electrónica AgoraX - Proyecto académico ITM (Calidad del Software)"
-authors = ["Equipo AgoraX <equipo@itm.edu.co>"]
-license = "MIT"
+version = "0.1.0"
+description = "Backend de AgoraX - Sistema de votación electrónica para asambleas de conjuntos residenciales (Proyecto ITM - Calidad del Software)."
+authors = ["Equipo AgoraX <equipo@agorax.local>"]
 readme = "README.md"
-packages = [{include = "app"}]
+packages = [{ include = "app" }]
 
 [tool.poetry.dependencies]
 python = "^3.11"
-fastapi = "^0.111.0"
-uvicorn = {extras = ["standard"], version = "^0.30.0"}
-sqlalchemy = "^2.0.32"
+fastapi = "^0.115.0"
+uvicorn = { extras = ["standard"], version = "^0.30.0" }
+pydantic = "^2.9.0"
+pydantic-settings = "^2.4.0"
+SQLAlchemy = "^2.0.36"
 psycopg2-binary = "^2.9.9"
-pydantic = "^2.7.0"
 python-jose = "^3.3.0"
 passlib = "^1.7.4"
-redis = "^5.0.4"
+bcrypt = "^4.2.0"
 cryptography = "^43.0.0"
-python-multipart = "^0.0.9"
-jinja2 = "^3.1.4"
 
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.2.1"
-pytest-asyncio = "^0.23.6"
-black = "^24.4.2"
-flake8 = "^7.1.0"
-isort = "^5.13.2"
-httpx = "^0.27.0"
-
-
-[tool.poetry.group.docs.dependencies]
+# Para documentación futura (generación de docs a partir de docstrings)
 mkdocs = "^1.6.0"
 mkdocs-material = "^9.5.0"
-mkdocstrings = {version = "^0.25.0", extras = ["python"]}
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+httpx = "^0.27.0"
+ruff = "^0.6.0"
+black = "^24.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

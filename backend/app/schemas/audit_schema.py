@@ -1,15 +1,33 @@
-from pydantic import BaseModel, Field
+"""
+backend/app/schemas/audit_schema.py
+
+Esquemas Pydantic relacionados con la auditoría (AuditLog).
+
+Se usan principalmente en endpoints internos o vistas
+que quieran mostrar el historial de acciones relevantes.
+"""
+
 from datetime import datetime
+from typing import Optional
 
-class AuditCreate(BaseModel):
-    event_type: str = Field(..., max_length=50)
-    user_email: str | None = None
-    description: str | None = None
+from pydantic import BaseModel
 
-class AuditOut(AuditCreate):
+
+class AuditLogRead(BaseModel):
+    """
+    Esquema de lectura de un registro de auditoría.
+
+    No se define esquema de creación porque en general
+    los registros se generan desde la capa de servicios.
+    """
+
     id: int
+    user_id: Optional[int]
+    action: str
+    entity_type: str
+    entity_id: Optional[int]
+    description: Optional[str]
     created_at: datetime
 
-    model_config = {
-        "from_attributes": True
-    }
+    class Config:
+        from_attributes = True
