@@ -1,95 +1,138 @@
-<template>
-  <div class="app">
-    <header class="app-header">
-      <h1>AgoraX – Sistema de Votación Electrónica</h1>
-    </header>
-
-    <main class="app-main">
-      <Login
-        v-if="!isAuthenticated"
-        @login-success="handleLoginSuccess"
-      />
-
-      <section v-else class="layout">
-        <div class="column">
-          <h2>Votación</h2>
-          <VotingPanel
-            :meeting-id="meetingId"
-            :token="token"
-            @voted="handleVoted"
-          />
-        </div>
-
-        <div class="column">
-          <h2>Estado de quórum</h2>
-          <Results
-            :meeting-id="meetingId"
-            :reload-trigger="reloadResults"
-          />
-        </div>
-      </section>
-    </main>
-  </div>
-</template>
-
 <script setup>
+/**
+ * Componente raíz de AgoraX.
+ *
+ * Responsabilidades:
+ * - Gestionar el estado global de autenticación (token + usuario).
+ * - Controlar qué se ve: Login vs Panel de Votación + Resultados.
+ * - Compartir selección de reunión/punto entre VotingPanel y Results.
+ */
+
 import { ref } from "vue";
 import Login from "./components/Login.vue";
 import VotingPanel from "./components/VotingPanel.vue";
 import Results from "./components/Results.vue";
 
-const token = ref(localStorage.getItem("agorax_token") || "");
-const isAuthenticated = ref(!!token.value);
+// Base del backend: se puede sobreescribir con VITE_API_BASE_URL
+const apiBaseUrl =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
-// Por simplicidad, trabajamos con la asamblea #1
-const meetingId = ref(1);
+const token = ref(localStorage.getItem("agx_token") || "");
+const currentUserEmail = ref(localStorage.getItem("agx_user_email") || "");
 
-// Trigger para recargar resultados después de votar
-const reloadResults = ref(0);
+// Selección actual de asamblea/punto para compartir con Results
+const selectedMeetingId = ref(null);
+const selectedAgendaItemId = ref(null);
 
-const handleLoginSuccess = (newToken) => {
-  token.value = newToken;
-  isAuthenticated.value = true;
-  localStorage.setItem("agorax_token", newToken);
-};
+/**
+ * Maneja login exitoso, guarda token en memoria y localStorage.
+ */
+function handleLoginSuccess(payload) {
+  token.value = payload.token;
+  currentUserEmail.value = payload.email;
+  localStorage.setItem("agx_token", payload.token);
+  localStorage.setItem("agx_user_email", payload.email);
+}
 
-const handleVoted = () => {
-  // Cada vez que se vote, incrementamos el trigger
-  reloadResults.value++;
-};
+/**
+ * Permite que VotingPanel notifique qué punto está seleccionado.
+ */
+function handleSelectionChanged(selection) {
+  selectedMeetingId.value = selection.meetingId;
+  selectedAgendaItemId.value = selection.agendaItemId;
+}
+
+/**
+ * Limpia sesión local.
+ */
+function handleLogout() {
+  token.value = "";
+  currentUserEmail.value = "";
+  selectedMeetingId.value = null;
+  selectedAgendaItemId.value = null;
+  localStorage.removeItem("agx_token");
+  localStorage.removeItem("agx_user_email");
+}
 </script>
 
-<style>
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
-  background: #0f172a;
-  color: #e5e7eb;
-}
+<template>
+  <div class="app-shell">
+    <!-- HEADER -->
+    <header class="app-header">
+      <div class="app-header-left">
+        <div class="app-title">AgoraX</div>
+        <div class="app-subtitle">
+          Sistema de votación electrónica para Asambleas de Conjuntos
+          Residenciales
+        </div>
+      </div>
 
-.app-header {
-  background: #020617;
-  padding: 1rem 2rem;
-  border-bottom: 1px solid #1f2933;
-}
+      <div class="app-header-right">
+        <span class="chip">Proyecto ITM · Calidad del Software</span>
+        <template v-if="token">
+          <span class="tag">
+            <span class="tag-dot" /> {{ currentUserEmail }}
+          </span>
+          <button class="btn btn-ghost" @click="handleLogout">
+            Cerrar sesión
+          </button>
+        </template>
+      </div>
+    </header>
 
-.app-main {
-  padding: 1.5rem 2rem;
-}
+    <!-- CONTENIDO PRINCIPAL -->
+    <main class="app-main">
+      <!-- Si NO hay token, mostramos solo Login -->
+      <div v-if="!token" class="layout-grid">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Ingreso a AgoraX</div>
+              <div class="card-subtitle">
+                Autentícate para participar en la asamblea.
+              </div>
+            </div>
+          </div>
+          <Login :api-base-url="apiBaseUrl" @login-success="handleLoginSuccess" />
+        </div>
+      </div>
 
-.layout {
-  display: flex;
-  gap: 2rem;
-  flex-wrap: wrap;
-}
+      <!-- Si hay token, mostramos Panel + Resultados -->
+      <div v-else class="layout-grid">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Panel de Votación</div>
+              <div class="card-subtitle">
+                Selecciona la asamblea, registra asistencia y emite tu voto.
+              </div>
+            </div>
+            <span class="badge">Votación activa</span>
+          </div>
+          <VotingPanel
+            :api-base-url="apiBaseUrl"
+            :token="token"
+            @selection-changed="handleSelectionChanged"
+          />
+        </div>
 
-.column {
-  flex: 1;
-  min-width: 280px;
-  background: #020617;
-  padding: 1rem 1.5rem;
-  border-radius: 0.75rem;
-  border: 1px solid #1e293b;
-}
-</style>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Resultados y Actividad</div>
+              <div class="card-subtitle">
+                Resumen de votos registrados por punto de agenda.
+              </div>
+            </div>
+          </div>
+          <Results
+            :api-base-url="apiBaseUrl"
+            :token="token"
+            :meeting-id="selectedMeetingId"
+            :agenda-item-id="selectedAgendaItemId"
+          />
+        </div>
+      </div>
+    </main>
+  </div>
+</template>

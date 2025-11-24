@@ -1,25 +1,24 @@
-version: "3.9"
-
 services:
   backend:
     build: ./backend
     container_name: agorax-backend
-    restart: always
+    restart: unless-stopped
     env_file: .env
     ports:
       - "8000:8000"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     networks:
       - agorax-net
     volumes:
-      - ./backend/app:/app/app   # Permite desarrollo en vivo (opcional)
+      - ./backend/app:/app/app   # Desarrollo en vivo del backend
     command: poetry run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   db:
     image: postgres:17
     container_name: agorax-db
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -31,14 +30,24 @@ services:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - agorax-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   frontend:
     build: ./frontend
     container_name: agorax-frontend
     restart: unless-stopped
     working_dir: /app
+    # Truco: el código viene del host, pero node_modules vive en un volumen
     volumes:
       - ./frontend:/app
+      - /app/node_modules
+    environment:
+      # El JS en el navegador llama al backend por localhost
+      VITE_API_BASE_URL: "http://localhost:8000"
     ports:
       - "5173:5173"
     depends_on:

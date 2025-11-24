@@ -1,21 +1,23 @@
 # ============================================================
-# Frontend AgoraX - Vue 3 + Vite en Docker
+# Frontend AgoraX - Vue 3 + Vite
+# Se ejecuta SOLO dentro de Docker, sin npm local
 # ============================================================
+
 FROM node:20-alpine
 
-# Directorio de trabajo dentro del contenedor
 WORKDIR /app
 
-# Copiar manifests primero para aprovechar cache
+# Copiamos definiciones de dependencias
 COPY package.json ./
 
-# Instalar dependencias
+# Instalamos dependencias dentro del contenedor
 RUN npm install
 
-# Copiar el resto del código (src, index.html, vite.config.js, etc.)
+# Copiamos el resto del frontend
 COPY . .
 
+# Vite dev server
 EXPOSE 5173
 
-# Servidor de desarrollo Vite
+# Ejecutamos Vite en modo dev, accesible desde el host
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
