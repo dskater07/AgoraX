@@ -1,40 +1,44 @@
-import os
+"""
+backend/app/core/config.py
+
+Configuración central de la aplicación AgoraX.
+"""
+
 from functools import lru_cache
+from pydantic import BaseSettings
 
-class Settings:
-    # --- App ---
-    APP_NAME: str = os.getenv("APP_NAME", "AgoraX Backend API")
-    APP_VERSION: str = os.getenv("APP_VERSION", "1.0.0")
-    APP_DESC: str = os.getenv(
-        "APP_DESC",
-        "Sistema de votación electrónica para asambleas residenciales - Proyecto ITM (Calidad del Software)"
-    )
 
-    # --- DB ---
-    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "agx_user")
-    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "agx_pass")
-    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "agorax_db")
-    POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "db")
-    POSTGRES_PORT: str = os.getenv("POSTGRES_PORT", "5432")
-    DATABASE_URL: str = (
-        f"postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASSWORD}@"
-        f"{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
-    )
+class Settings(BaseSettings):
+    """
+    Configuración de entorno para AgoraX.
+    """
 
-    # --- Security / JWT ---
-    JWT_SECRET: str = os.getenv("JWT_SECRET", "secret123")
-    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
-    JWT_EXPIRE_MINUTES: int = int(os.getenv("JWT_EXPIRE_MINUTES", "60"))
+    APP_NAME: str = "AgoraX Backend API"
+    APP_VERSION: str = "1.0.0"
 
-    # --- CORS ---
-    CORS_ORIGINS: list[str] = [
-        o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",")
-    ]
+    POSTGRES_USER: str = "agx_user"
+    POSTGRES_PASSWORD: str = "agx_pass"
+    POSTGRES_DB: str = "agorax_db"
+    POSTGRES_HOST: str = "db"
+    POSTGRES_PORT: int = 5432
 
-    # --- Business params (quorum, etc) ---
-    TOTAL_PROPIETARIOS: int = int(os.getenv("TOTAL_PROPIETARIOS", "100"))
-    QUORUM_MIN: float = float(os.getenv("QUORUM_MIN", "51.0"))
+    JWT_SECRET: str = "secret123"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 60
 
-@lru_cache
+    TOTAL_PROPIETARIOS: int = 100
+    QUORUM_MIN: float = 51.0
+
+    VOTE_ENCRYPTION_KEY: str | None = None  # Si no se define, se genera al vuelo (solo dev)
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+
+@lru_cache()
 def get_settings() -> Settings:
+    """
+    Devuelve una instancia singleton de Settings.
+    """
     return Settings()

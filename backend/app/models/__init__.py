@@ -1,6 +1,7 @@
-from .user import User
-from .meeting import Meeting
-from .vote import Vote
-from .audit import AuditLog
+"""
+backend/app/models/__init__.py
 
-__all__ = ["User", "Meeting", "Vote", "AuditLog"]
+Facilita las importaciones de modelos.
+"""
+
+from .models import User, Owner, Condominium, Meeting, AgendaItem, Presence, Vote  # noqa
