@@ -21,21 +21,13 @@ from app.core.security import (
 from app.models import User
 from app.schemas.user_schema import UserCreate, UserRead, Token
 
-router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
     """
     Registra un nuevo usuario en el sistema.
-
-    NOTA ACADÉMICA:
-        - En un entorno productivo, probablemente no se expondría un endpoint
-          de registro general, sino que estaría restringido a administradores.
-
-    Regla de negocio relacionada:
-        - RD-03: Solo usuarios autenticados pueden votar (este endpoint permite
-          crear dichas identidades).
     """
     existing = db.query(User).filter(User.email == user_in.email).first()
     if existing:
@@ -61,13 +53,6 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
 def login(user_in: UserCreate, db: Session = Depends(get_db)):
     """
     Autentica a un usuario existente y devuelve un token JWT.
-
-    Implementa:
-        - Verificación de credenciales (email + password).
-        - Generación de token JWT con create_access_token.
-
-    Regla:
-        - RD-03: Solo usuarios autenticados pueden votar (a partir de este token).
     """
     user = db.query(User).filter(User.email == user_in.email).first()
     if not user:
@@ -90,7 +75,5 @@ def login(user_in: UserCreate, db: Session = Depends(get_db)):
 def read_current_user(current_user: User = Depends(get_current_user)):
     """
     Devuelve la información del usuario autenticado actual.
-
-    Se basa en el token JWT enviado en la cabecera Authorization.
     """
     return current_user

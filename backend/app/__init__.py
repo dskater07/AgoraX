@@ -1,17 +1,8 @@
 """
 backend/app/__init__.py
 
-Inicializador del paquete principal de AgoraX.
-
-Este módulo define únicamente los subpaquetes disponibles
-y evita realizar importaciones profundas para prevenir ciclos
-de dependencias y errores de carga en tiempo de ejecución.
+Inicializa el paquete principal del backend AgoraX.
+Expone la instancia de FastAPI como `app` para Uvicorn.
 """
 
-__all__ = [
-    "api",
-    "core",
-    "models",
-    "schemas",
-    "services",
-]
+from .main import app  # noqa: F401

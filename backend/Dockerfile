@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     curl \
+    ca-certificates \  # <--- Asegura certificados para HTTPS/SSL
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar Poetry

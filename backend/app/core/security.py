@@ -1,157 +1,133 @@
 """
 backend/app/core/security.py
 
-Funciones de seguridad del backend AgoraX.
+Funciones y utilidades de seguridad para AgoraX:
 
-Incluye:
-- Gestión de contraseñas (hash y verificación).
-- Manejo de JWT (creación y validación de tokens).
-- Obtención del usuario actual (get_current_user).
-- Cifrado y descifrado de votos (RD-06).
+- Hash y verificación de contraseñas.
+- Creación y validación de tokens JWT.
+- Dependencia get_current_user para obtener el usuario autenticado.
+
+Se integra con:
+    - app.core.config.Settings (SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES)
+    - app.core.db.get_db
+    - app.schemas.TokenData
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import datetime, timedelta
+from typing import Optional, Any
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, JWTError
+from jose import JWTError, jwt
 from passlib.context import CryptContext
-from cryptography.fernet import Fernet
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
-from app.core.db import SessionLocal
-from app.models import User
+from app.core.config import settings
+from app.core.db import get_db
+from app.schemas import TokenData
 
-settings = get_settings()
-
-# ================== CONTRASEÑAS ==================
-
+# Contexto de hashing de contraseñas
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# Esquema OAuth2 para extraer el token de la cabecera Authorization
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
+
+# =========================================================
+# Gestión de contraseñas
+# =========================================================
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
-    Verifica una contraseña en texto plano contra su hash.
-
-    :param plain_password: Contraseña provista por el usuario.
-    :param hashed_password: Hash almacenado en base de datos.
-    :return: True si coincide, False en caso contrario.
+    Verifica que la contraseña en texto plano coincida con el hash almacenado.
     """
     return pwd_context.verify(plain_password, hashed_password)
 
 
 def get_password_hash(password: str) -> str:
     """
-    Genera el hash seguro para una contraseña.
-
-    :param password: Contraseña en texto plano.
-    :return: Cadena hasheada lista para persistir.
+    Genera un hash seguro de la contraseña.
     """
     return pwd_context.hash(password)
 
 
-# ================== JWT ==================
+# =========================================================
+# Gestión de JWT
+# =========================================================
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-
-
-def create_access_token(subject: str, expires_minutes: Optional[int] = None) -> str:
+def create_access_token(
+    subject: str,
+    expires_delta: Optional[timedelta] = None,
+) -> str:
     """
-    Crea un token JWT para el usuario autenticado.
+    Crea un token JWT de acceso.
 
-    :param subject: Identificador único (por ejemplo, email del usuario).
-    :param expires_minutes: Minutos hasta la expiración del token.
-    :return: Token JWT como cadena.
+    Parámetros:
+        subject: Identificador del sujeto (normalmente email del usuario).
+        expires_delta: Tiempo de expiración; si no se envía, se usa
+                       ACCESS_TOKEN_EXPIRE_MINUTES de la configuración.
+
+    Devuelve:
+        Token JWT como cadena.
     """
-    if expires_minutes is None:
-        expires_minutes = settings.JWT_EXPIRE_MINUTES
+    if expires_delta is None:
+        expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
-    payload = {"sub": subject, "exp": expire}
-
-    token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
-    return token
-
-
-def _get_db_for_security():
-    """
-    Crea una sesión de base de datos exclusiva para funciones de seguridad.
-
-    Esta función se usa internamente en get_current_user.
-    """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    expire = datetime.utcnow() + expires_delta
+    to_encode = {"sub": subject, "exp": expire}
+    encoded_jwt = jwt.encode(
+        to_encode,
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+    )
+    return encoded_jwt
 
 
-async def get_current_user(
+# =========================================================
+# Usuario actual a partir del token
+# =========================================================
+
+def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: Session = Depends(_get_db_for_security),
-) -> User:
+    db: Session = Depends(get_db),
+) -> Any:
     """
-    Obtiene el usuario actual a partir del JWT enviado en la cabecera Authorization.
+    Obtiene el usuario actual autenticado a partir del token JWT.
 
-    Implementa RD-03: Solo usuarios autenticados pueden votar.
+    Pasos:
+        1. Decodifica el token usando SECRET_KEY y ALGORITHM.
+        2. Extrae el campo "sub" (email del usuario).
+        3. Consulta en la base de datos el usuario con ese email.
+        4. Si algo falla, lanza HTTP 401.
 
-    :raises HTTPException: Si el token es inválido o el usuario no existe.
-    :return: Instancia de User.
+    Devuelve:
+        Instancia de User correspondiente al token.
     """
-    cred_exc = HTTPException(
+    # Importación diferida para evitar ciclos de importación
+    from app.models.user import User
+
+    credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="No se pudo validar el token.",
+        detail="No se pudieron validar las credenciales.",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
     try:
         payload = jwt.decode(
             token,
-            settings.JWT_SECRET,
-            algorithms=[settings.JWT_ALGORITHM],
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
         )
-        email: str = payload.get("sub")
-        if email is None:
-            raise cred_exc
-    except JWTError:
-        raise cred_exc
+        sub: Optional[str] = payload.get("sub")
+        if sub is None:
+            raise credentials_exception
 
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-        raise cred_exc
+        token_data = TokenData(username=sub)
+    except JWTError:
+        raise credentials_exception
+
+    user = db.query(User).filter(User.email == token_data.username).first()
+    if user is None:
+        raise credentials_exception
 
     return user
-
-
-# ================== CIFRADO DE VOTOS (RD-06) ==================
-
-if settings.VOTE_ENCRYPTION_KEY:
-    _key = settings.VOTE_ENCRYPTION_KEY.encode("utf-8")
-else:
-    # Clave generada dinámicamente para entornos de desarrollo
-    _key = Fernet.generate_key()
-
-_fernet = Fernet(_key)
-
-
-def encrypt_vote_value(value: str) -> str:
-    """
-    Cifra el valor de un voto antes de almacenarlo (RD-06).
-
-    :param value: Opción de voto en texto claro.
-    :return: Cadena cifrada (base64).
-    """
-    token = _fernet.encrypt(value.encode("utf-8"))
-    return token.decode("utf-8")
-
-
-def decrypt_vote_value(value_encrypted: str) -> str:
-    """
-    Descifra el valor cifrado de un voto, para uso en agregaciones o auditoría.
-
-    :param value_encrypted: Valor cifrado almacenado.
-    :return: Valor en texto claro.
-    """
-    return _fernet.decrypt(value_encrypted.encode("utf-8")).decode("utf-8")
